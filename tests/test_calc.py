@@ -51,3 +51,38 @@ def test_transfers_and_reconciliation():
     assert [(d.day, a) for d, a, *_ in st.flows] == [(4, -200.0), (5, 1000.0)]
     assert st.expected_flow == 1300.0
     assert any("Select All" in w for w in st.warnings)
+
+
+def test_trades_orders_and_ranking():
+    from app import trades
+
+    xml = """<FlexQueryResponse><FlexStatements count="1">
+<FlexStatement accountId="U1" fromDate="20260701" toDate="20260930">
+<Trades>
+  <Trade accountId="U1" currency="USD" fxRateToBase="1" assetCategory="STK" symbol="TSLA" description="TESLA INC" conid="76792991"
+    tradeDate="20260730" dateTime="20260730;110150" buySell="BUY" quantity="300" tradePrice="303.00" proceeds="-90900"
+    ibCommission="-1.5" fifoPnlRealized="0" openCloseIndicator="O" ibOrderID="1001" transactionID="1" levelOfDetail="EXECUTION" />
+  <Trade accountId="U1" currency="USD" fxRateToBase="1" assetCategory="STK" symbol="TSLA" description="TESLA INC" conid="76792991"
+    tradeDate="20260730" dateTime="20260730;110152" buySell="BUY" quantity="200" tradePrice="304.75" proceeds="-60950"
+    ibCommission="-1" fifoPnlRealized="0" openCloseIndicator="O" ibOrderID="1001" transactionID="2" levelOfDetail="EXECUTION" />
+  <Trade accountId="U1" currency="USD" fxRateToBase="1" assetCategory="OPT" symbol="TSLA  270617C00400000" underlyingSymbol="TSLA"
+    description="TSLA 17JUN27 400 C" conid="999" putCall="C" strike="400" expiry="20270617" multiplier="100"
+    tradeDate="20260922" dateTime="20260922;100249" buySell="SELL" quantity="-5" tradePrice="55.04" proceeds="27520"
+    ibCommission="-3.5" fifoPnlRealized="12138.5" openCloseIndicator="C" ibOrderID="2002" transactionID="3" levelOfDetail="EXECUTION" />
+  <Trade accountId="U1" symbol="TSLA" levelOfDetail="ORDER" quantity="500" tradeDate="20260730" />
+</Trades>
+</FlexStatement></FlexStatements></FlexQueryResponse>"""
+    (st,) = parse_flex_xml(xml)
+    assert len(st.trades) == 3  # ORDER 汇总行被忽略
+    rows = [dict(t, account_id="U1") for t in st.trades]
+    fx = calc.FxConverter([], "USD")
+
+    orders = trades.build_orders(rows, fx, {"U1": "USD"})
+    assert len(orders) == 2
+    opt, stk = orders  # 按时间倒序
+    assert (opt["name"], opt["code"], opt["side"], opt["quantity"]) == ("TSLA Call", "270617 400", "SELL", 5)
+    assert (stk["quantity"], stk["fills"], stk["time"]) == (500, 2, "11:01:50")
+    assert abs(stk["avg_price"] - (300 * 303 + 200 * 304.75) / 500) < 1e-9
+
+    ranking = trades.build_ranking(rows, fx, {"U1": "USD"})
+    assert [(r["name"], r["pnl"]) for r in ranking] == [("TSLA Call", 12138.5)]
