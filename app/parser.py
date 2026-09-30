@@ -5,6 +5,7 @@
 - CashTransactions / CashTransaction：出入金（type 为 Deposits/Withdrawals）
 - Transfers / Transfer：持仓转入转出（只取持仓市值部分，现金部分已在 CashTransactions 中）
 - ConversionRates / ConversionRate：汇率（多币种账户合并时使用）
+- Trades / Trade（levelOfDetail=EXECUTION）：逐笔成交，用于订单查询与已实现盈亏排行
 """
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -34,6 +35,58 @@ def _num(raw: str | None) -> float:
     return float(raw.replace(",", ""))
 
 
+def _time(raw: str | None) -> str:
+    """从 dateTime（如 "20260922;100249"）中取出 "10:02:49"。"""
+    if not raw:
+        return ""
+    for sep in (";", ",", " ", "T"):
+        if sep in raw:
+            digits = "".join(c for c in raw.split(sep, 1)[1] if c.isdigit())
+            if len(digits) >= 4:
+                digits = digits.ljust(6, "0")
+                return f"{digits[:2]}:{digits[2:4]}:{digits[4:6]}"
+    return ""
+
+
+def _parse_trade(row: ET.Element) -> dict | None:
+    d = parse_date(row.get("tradeDate") or row.get("dateTime") or row.get("reportDate"))
+    qty = _num(row.get("quantity"))
+    if d is None or not qty:
+        return None
+    side = (row.get("buySell") or ("BUY" if qty > 0 else "SELL")).upper()
+    expiry = parse_date(row.get("expiry"))
+    trade_id = row.get("transactionID") or row.get("tradeID") or row.get("ibExecID")
+    if not trade_id:
+        trade_id = f"{row.get('conid')}-{row.get('dateTime')}-{qty}-{row.get('tradePrice')}"
+    return {
+        "trade_id": trade_id,
+        "order_id": row.get("ibOrderID") or row.get("orderID") or trade_id,
+        "trade_date": d.isoformat(),
+        "time": _time(row.get("dateTime")),
+        "asset": (row.get("assetCategory") or "").upper(),
+        "conid": row.get("conid") or row.get("symbol") or "",
+        "symbol": row.get("symbol") or "",
+        "underlying": row.get("underlyingSymbol") or "",
+        "description": row.get("description") or "",
+        "put_call": (row.get("putCall") or "").upper(),
+        "strike": _num(row.get("strike")),
+        "expiry": expiry.isoformat() if expiry else "",
+        "multiplier": _num(row.get("multiplier")) or 1.0,
+        "currency": row.get("currency") or "",
+        "fx": _num(row.get("fxRateToBase")) or 1.0,
+        "side": "SELL" if side.startswith("SELL") else "BUY",
+        "cancelled": "CA." in side,
+        "quantity": abs(qty),
+        "price": _num(row.get("tradePrice")),
+        "proceeds": _num(row.get("proceeds")),
+        "commission": _num(row.get("ibCommission")),
+        "realized": _num(row.get("fifoPnlRealized")),
+        "open_close": (row.get("openCloseIndicator") or "").upper(),
+        "order_type": row.get("orderType") or "",
+        "exchange": row.get("exchange") or row.get("listingExchange") or "",
+    }
+
+
 def _is_detail(el: ET.Element) -> bool:
     """同时勾选了 Summary 时会多出汇总行，这里只保留明细（Transfers 的明细行 levelOfDetail 为 TRANSFER）。"""
     lod = (el.get("levelOfDetail") or "DETAIL").upper()
@@ -56,6 +109,8 @@ class AccountStatement:
     # IBKR Change in NAV 汇总里的外部资金流（入金+内部划转+转仓），用于对账；未勾选该 section 时为 None
     expected_flow: float | None = None
     warnings: list[str] = field(default_factory=list)
+    # 逐笔成交；None 表示该 Query 没有勾选 Trades section（此时不应覆盖已有成交数据）
+    trades: list[dict] | None = None
 
 
 def parse_flex_xml(text: str) -> list[AccountStatement]:
@@ -115,6 +170,18 @@ def parse_flex_xml(text: str) -> list[AccountStatement]:
             acct.warnings.append(f"Transfers 有 {blank_transfers} 条记录但没有字段，请在该 section 中 Select All 字段")
         if "CashTransactions" not in acct.sections:
             acct.warnings.append("未包含 Cash Transactions section，银行出入金无法剔除")
+
+        if "Trades" in acct.sections:
+            acct.trades = []
+            for row in st.iter("Trade"):
+                # 同时勾选了 Order / Closed Lots / Symbol Summary 等选项时，只取逐笔成交
+                if (row.get("levelOfDetail") or "EXECUTION").upper() != "EXECUTION":
+                    continue
+                t = _parse_trade(row)
+                if t:
+                    acct.trades.append(t)
+            if acct.trades is not None and st.find("Trades/Trade") is not None and not acct.trades:
+                acct.warnings.append("Trades 中没有逐笔成交（Execution），请在 Trades 选项中勾选 Execution 并 Select All 字段")
 
         for row in st.iter("ChangeInNAV"):
             acct.expected_flow = sum(_num(row.get(k)) for k in (

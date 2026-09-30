@@ -16,7 +16,13 @@ const state = {
   daily: new Map(),
   months: new Map(),
   years: new Map(),
+  route: "home",                          // home | ranking | orders
+  topMode: "win",                         // 首页 Top5：win | loss
+  rankMode: "win",                        // 排行榜页：win | loss
+  rankDesc: true,                         // 排行榜页排序：按绝对值从大到小
+  orders: { q: "", side: "", asset: "", offset: 0, total: 0, list: [], open: null },
 };
+const PAGE_SIZE = 50;
 
 // ---------- 格式化 ----------
 function fmtMoney(v, { sign = true, compact = true } = {}) {
@@ -37,6 +43,7 @@ function fmtPct(v) {
   if (v == null || isNaN(v)) return "--";
   return `${v > 0 ? "+" : ""}${(v * 100).toFixed(2)}%`;
 }
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -117,19 +124,30 @@ function rangeBounds() {
   }
 }
 
-async function renderSummary() {
+// 查询用的区间："近 N 月" 的起点当天不算，区间从起点的下一天开始
+function queryBounds() {
+  let [start, end] = rangeBounds();
+  if (["1m", "6m", "1y"].includes(state.range)) {
+    const s = new Date(start + "T00:00"); s.setDate(s.getDate() + 1); start = iso(s);
+  }
+  return [start, end];
+}
+function rangeQuery() {
+  const [start, end] = queryBounds();
+  return [acctParam(), start && `start=${start}`, end && `end=${end}`].filter(Boolean).join("&");
+}
+const RANGE_NAMES = { "1m": "近1月", "6m": "近6月", ytd: "本年", "1y": "近1年", all: "全部", custom: "区间" };
+
+function renderRangeChips() {
   document.querySelectorAll("#rangeChips button").forEach((b) => b.classList.toggle("active", b.dataset.range === state.range));
   $("#customRange").classList.toggle("hidden", state.range !== "custom");
   $("#customStart").value = state.custom.start;
   $("#customEnd").value = state.custom.end;
+  document.querySelectorAll(".range-name").forEach((el) => (el.textContent = RANGE_NAMES[state.range]));
+}
 
-  let [start, end] = rangeBounds();
-  // "近 N 月" 的起点当天不算：区间盈亏从起点的下一个交易日开始
-  if (["1m", "6m", "1y"].includes(state.range)) {
-    const s = new Date(start + "T00:00"); s.setDate(s.getDate() + 1); start = iso(s);
-  }
-  const q = [acctParam(), start && `start=${start}`, end && `end=${end}`].filter(Boolean).join("&");
-  const s = await api(`/api/summary?${q}`);
+async function renderSummary() {
+  const s = await api(`/api/summary?${rangeQuery()}`);
 
   const set = (id, html, c = "") => { const el = $(id); el.innerHTML = html; el.className = c; };
   if (!s) {
@@ -257,7 +275,7 @@ function bind() {
     const b = e.target.closest("button"); if (!b) return;
     state.account = b.dataset.acct; store.set("account", state.account);
     document.querySelectorAll("#accountChips button").forEach((x) => x.classList.toggle("active", x === b));
-    await loadData(); renderCalendar(); renderSummary();
+    await loadData(); renderCalendar(); renderView();
   });
   $("#rangeChips").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
@@ -266,11 +284,11 @@ function bind() {
       const [s, en] = [state.meta.first_date || "", state.meta.last_date || ""];
       state.custom = { start: s, end: en };
     }
-    renderSummary();
+    renderView();
   });
   $("#customApply").addEventListener("click", () => {
     state.custom = { start: $("#customStart").value, end: $("#customEnd").value };
-    store.set("custom", state.custom); renderSummary();
+    store.set("custom", state.custom); renderView();
   });
   $("#viewSeg").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
@@ -313,6 +331,28 @@ function bind() {
   $("#redUp").checked = redUp; document.body.classList.toggle("red-up", redUp);
   $("#redUp").addEventListener("change", (e) => { store.set("redUp", e.target.checked); document.body.classList.toggle("red-up", e.target.checked); });
 
+  const segBind = (id, key, fn) => $(id).addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state[key] = b.dataset.v; fn();
+  });
+  segBind("#topSeg", "topMode", () => renderTop(state.rankingCache));
+  segBind("#rankSeg", "rankMode", () => renderRankPage(state.rankingCache));
+  $("#rankSort").addEventListener("click", () => { state.rankDesc = !state.rankDesc; renderRankPage(state.rankingCache); });
+
+  let timer;
+  $("#orderSearch").addEventListener("input", (e) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { state.orders.q = e.target.value.trim(); loadOrders(); }, 250);
+  });
+  $("#orderSide").addEventListener("change", (e) => { state.orders.side = e.target.value; loadOrders(); });
+  $("#orderAsset").addEventListener("change", (e) => { state.orders.asset = e.target.value; loadOrders(); });
+  $("#orderMore").addEventListener("click", () => loadOrders(true));
+  $("#orderList").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-oid]"); if (!row) return;
+    state.orders.open = state.orders.open === row.dataset.oid ? null : row.dataset.oid;
+    renderOrderList();
+  });
+
   $("#refreshBtn").addEventListener("click", async () => {
     try {
       await api("/api/refresh", { method: "POST" });
@@ -326,7 +366,157 @@ async function pollFetch() {
   await new Promise((r) => setTimeout(r, 3000));
   await loadMeta();
   if (state.meta.fetching) return pollFetch();
-  await loadData(); renderCalendar(); renderSummary();
+  await loadData(); renderCalendar(); renderView();
+}
+
+// ---------- 路由 ----------
+const ROUTES = {
+  home: { title: "资产盈亏分析", view: "#homeView" },
+  ranking: { title: "盈亏排行榜", view: "#rankingView" },
+  orders: { title: "订单查询", view: "#ordersView" },
+};
+
+async function renderView() {
+  const prev = state.route;
+  state.route = { "#/ranking": "ranking", "#/orders": "orders" }[location.hash] || "home";
+  const r = ROUTES[state.route];
+  Object.values(ROUTES).forEach((x) => $(x.view).classList.toggle("hidden", x !== r));
+  $("#pageTitle").textContent = r.title;
+  document.querySelectorAll("#tabbar a").forEach((el) => el.classList.toggle("active", el.dataset.route === state.route));
+  if (prev !== state.route) window.scrollTo(0, 0);
+  renderRangeChips();
+  if (state.route === "home") {
+    await Promise.all([renderSummary(), loadRanking()]);
+  } else if (state.route === "ranking") {
+    await loadRanking();
+  } else {
+    await loadOrders();
+  }
+}
+
+// ---------- 已实现盈亏排行 ----------
+const NO_TRADES_HINT = "还没有成交记录。请在 Flex Query 中勾选 Trades（Execution）并重新拉取，详见 README。";
+
+// 快速切换筛选条件时，只采用最后一次请求的结果
+const latest = { ranking: 0, orders: 0 };
+
+async function loadRanking() {
+  const seq = ++latest.ranking;
+  const data = await api(`/api/ranking?${rangeQuery()}`);
+  if (seq !== latest.ranking) return;
+  state.rankingCache = data;
+  if (state.route === "home") renderTop(state.rankingCache);
+  else renderRankPage(state.rankingCache);
+}
+
+function rankItems(data, mode) {
+  const items = (data?.items || []).filter((i) => (mode === "win" ? i.pnl > 0 : i.pnl < 0));
+  return mode === "win" ? items : items.reverse();   // 亏损：亏得最多的排前面
+}
+
+function rankItemHtml(item, i, maxAbs, numbered) {
+  const w = maxAbs ? Math.max(6, (Math.abs(item.pnl) / maxAbs) * 100) : 0;
+  const no = numbered ? `<span class="no n${i + 1}">${i + 1}</span>` : "";
+  return `<div class="rank-item">
+    <div class="bar ${cls(item.pnl)}" style="width:${w.toFixed(1)}%"></div>
+    ${no}
+    <div class="info"><div>${esc(item.name)}</div><div class="code"><span class="mkt">${esc(item.market)}</span>${esc(item.code)}</div></div>
+    <span class="val ${cls(item.pnl)}">${fmtFull(item.pnl)}</span>
+  </div>`;
+}
+
+function renderTop(data) {
+  document.querySelectorAll("#topSeg button").forEach((b) => b.classList.toggle("active", b.dataset.v === state.topMode));
+  const all = data?.items || [];
+  const best = all[0]?.pnl > 0 ? all[0] : null;
+  const worst = all.at(-1)?.pnl < 0 ? all.at(-1) : null;
+  const vs = $("#versus");
+  if (best || worst) {
+    const a = Math.abs(best?.pnl || 0), b = Math.abs(worst?.pnl || 0);
+    const share = best && worst ? Math.min(0.72, Math.max(0.28, a / (a + b))) : best ? 1 : 0;
+    vs.innerHTML = (best ? `<div class="w" style="flex:${share}"><span>${esc(best.code.length > 8 ? best.name : best.code)}.${esc(best.market)}</span><b>${fmtFull(best.pnl)}</b></div>` : "")
+      + (worst ? `<div class="l" style="flex:${1 - share}"><span>${esc(worst.code.length > 8 ? worst.name : worst.code)}.${esc(worst.market)}</span><b>${fmtFull(worst.pnl)}</b></div>` : "");
+    vs.classList.remove("hidden");
+  } else vs.classList.add("hidden");
+
+  const items = rankItems(data, state.topMode).slice(0, 5);
+  const maxAbs = Math.max(0, ...items.map((i) => Math.abs(i.pnl)));
+  $("#topList").innerHTML = items.length
+    ? items.map((it, i) => rankItemHtml(it, i, maxAbs, true)).join("")
+    : `<div class="empty-hint">${state.meta.has_trades ? "该区间没有" + (state.topMode === "win" ? "盈利" : "亏损") + "的平仓记录" : NO_TRADES_HINT}</div>`;
+}
+
+function renderRankPage(data) {
+  document.querySelectorAll("#rankSeg button").forEach((b) => b.classList.toggle("active", b.dataset.v === state.rankMode));
+  const [start, end] = queryBounds();
+  const lo = start || data?.first_trade, hi = end || data?.last_trade;
+  const fmtCn = (d) => (d ? `${+d.slice(0, 4)} 年 ${+d.slice(5, 7)} 月 ${+d.slice(8, 10)} 日` : "");
+  $("#rankRange").textContent = lo ? `${fmtCn(lo)} - ${fmtCn(hi)}` : "";
+  $("#rankSortIcon").textContent = state.rankDesc ? "▼" : "▲";
+
+  let items = rankItems(data, state.rankMode);
+  if (!state.rankDesc) items = [...items].reverse();
+  const maxAbs = Math.max(0, ...items.map((i) => Math.abs(i.pnl)));
+  $("#rankList").innerHTML = items.length
+    ? items.map((it, i) => rankItemHtml(it, i, maxAbs, false)).join("")
+    : `<div class="empty-hint">${state.meta.has_trades ? "该区间没有记录" : NO_TRADES_HINT}</div>`;
+  const sum = items.reduce((a, i) => a + i.pnl, 0);
+  $("#rankTotal").innerHTML = items.length
+    ? `<span>${state.rankMode === "win" ? "盈利" : "亏损"}合计（${items.length} 个标的）</span><b class="${cls(sum)}">${fmtFull(sum)}</b>`
+    : "";
+  $("#rankTotal").classList.toggle("hidden", !items.length);
+}
+
+// ---------- 订单查询 ----------
+const fmtPrice = (v) => (Math.abs(v) < 1 ? v.toFixed(4) : v.toFixed(2));
+const fmtQty = (v) => v.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
+async function loadOrders(append = false) {
+  const o = state.orders;
+  const offset = append ? o.offset + PAGE_SIZE : 0;
+  const params = new URLSearchParams(rangeQuery());
+  if (o.q) params.set("q", o.q);
+  if (o.side) params.set("side", o.side);
+  if (o.asset) params.set("asset", o.asset);
+  params.set("offset", offset); params.set("limit", PAGE_SIZE);
+  const seq = ++latest.orders;
+  const res = await api(`/api/orders?${params}`);
+  if (seq !== latest.orders) return;
+  o.offset = offset;
+  o.total = res.total;
+  o.list = append ? [...o.list, ...res.orders] : res.orders;
+  renderOrderList();
+}
+
+function renderOrderList() {
+  const o = state.orders;
+  $("#orderCount").textContent = o.total ? `共 ${o.total} 笔` : "";
+  $("#orderMore").classList.toggle("hidden", o.list.length >= o.total);
+  if (!o.list.length) {
+    $("#orderList").innerHTML = `<div class="empty-hint">${state.meta.has_trades ? "没有符合条件的订单" : NO_TRADES_HINT}</div>`;
+    return;
+  }
+  $("#orderList").innerHTML = o.list.map((x) => {
+    const opt = x.asset === "OPT" || x.asset === "FOP";
+    const buy = x.side === "BUY";
+    const detail = o.open === x.id ? `<div class="order-detail">
+        <div><span>账户</span><span>${esc(accountName(x.account_id))}</span></div>
+        <div><span>开/平仓</span><span>${x.open_close.includes("C") ? "平仓" : x.open_close.includes("O") ? "开仓" : "--"}</span></div>
+        <div><span>成交金额</span><span>${fmtFull(x.amount, false)} ${esc(x.currency)}</span></div>
+        <div><span>佣金</span><span>${fmtFull(x.commission, false)}</span></div>
+        <div><span>已实现盈亏</span><span class="${cls(x.realized)}">${x.realized ? fmtFull(x.realized) : "--"}</span></div>
+        <div><span>成交笔数</span><span>${x.fills}${x.last_date !== x.date ? `（至 ${x.last_date}）` : ""}</span></div>
+        <div><span>订单类型</span><span>${esc(x.order_type || "--")}</span></div>
+        <div><span>交易所</span><span>${esc(x.exchange || "--")}</span></div>
+      </div>` : "";
+    return `<div class="order-row item" data-oid="${esc(x.id)}">
+      <div><div class="t1">${esc(x.name)}</div><div class="t2"><span class="mkt">${esc(x.market)}</span>${esc(x.code)}</div></div>
+      <div class="r"><div class="t1">${fmtQty(x.quantity)}${opt ? " 张" : ""}</div><div class="t2 mono">${fmtPrice(x.avg_price)}</div></div>
+      <div class="r"><div class="t1 ${buy ? "up" : "down"}">${buy ? "买入" : "卖出"}</div><div class="t2">已成交</div></div>
+      <div class="r"><div class="t1 mono date">${x.date.replaceAll("-", ".")}</div><div class="t2 mono">${esc(x.time)}</div></div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 
 // 支持通过 URL 参数打开指定视图，例如 ?view=year&metric=ret&range=1y&day=2026-09-11
@@ -349,7 +539,8 @@ function applyUrlParams() {
     await loadMeta();
     await loadData();
     renderCalendar();
-    await renderSummary();
+    window.addEventListener("hashchange", renderView);
+    await renderView();
     if (state.meta.fetching) pollFetch();
   } catch (err) {
     $("#banner").textContent = `加载失败：${err.message}`;

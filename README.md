@@ -1,20 +1,24 @@
 # IBKR 收益日历
 
-这个工具用 IBKR Flex Web Service 每天拉取一次各账户的 NAV（T+1），存进本地 SQLite，然后在网页里展示：
+这个工具用 IBKR Flex Web Service 拉取各账户的每日 NAV 和成交记录（T+1），存进本地 SQLite，然后在网页里展示：
 
 - **收益日历**：有月视图和年视图，可以在"收益（金额）"和"收益率"之间切换，点某一天可以看各账户的明细
 - **区间统计**：近1月、近6月、本年、近1年、全部，也可以自定义区间。显示区间盈亏、时间加权收益率、盈亏天数、最大单日盈亏和累计曲线
+- **已实现盈亏排行**：按标的汇总区间内的已实现盈亏，有盈利和亏损两个榜单，首页显示 Top5
+- **订单查询**：历史订单的标的、方向、数量、成交均价和时间；可以按名称或代码搜索，按方向、品种筛选；点开能看到成交金额、佣金和已实现盈亏
 - **多账户**：可以合并查看，也可以只看单个账户
 - 手机浏览器打开体验和 App 接近，也可以"添加到主屏幕"
 
 <p>
-  <img src="docs/screenshots/month.png" width="360" alt="月视图：每日盈亏日历与区间统计">
-  <img src="docs/screenshots/year.png" width="360" alt="年视图：每月收益率">
+  <img src="docs/screenshots/month.png" width="240" alt="月视图：每日盈亏日历与区间统计">
+  <img src="docs/screenshots/year.png" width="240" alt="年视图：每月收益率">
+  <img src="docs/screenshots/ranking.png" width="240" alt="已实现盈亏排行榜">
+  <img src="docs/screenshots/orders.png" width="240" alt="订单查询">
 </p>
 
 > 截图使用的是演示模式的模拟数据（`python -m app.demo`）。
 >
-> 页面支持通过 URL 参数打开指定视图，例如 `/?view=year&metric=ret&range=1y`、`/?day=2026-09-11`。
+> 页面支持通过 URL 参数打开指定视图，例如 `/?view=year&metric=ret&range=1y`、`/?day=2026-09-11`、`/?range=ytd#/ranking`、`/#/orders`。
 
 ---
 
@@ -33,6 +37,7 @@
 | **Net Asset Value (NAV) in Base** | ✅ 必选 | 每日总资产，计算的核心数据 |
 | **Cash Transactions** | ✅ 必选 | 里面的选项**只需要勾 `Deposits & Withdrawals`**，Level of detail 选 **Detail** |
 | **Transfers** | ✅ 必选 | 账户间现金划转、持仓转入转出。**点开后务必 Select All 字段**，否则只有空记录 |
+| **Trades** | 建议 | 订单查询和盈亏排行需要。选项里**只勾 `Execution`**，字段 **Select All**。其他选项（Closed Lots、Order、Symbol Summary 等）勾了也不影响，程序只读逐笔成交 |
 | **Change in NAV** | 建议 | 用来对账：拉取时会核对明细出入金的合计是否等于 IBKR 的汇总值，不一致会提示 |
 | **Conversion Rates** | 可选 | 只有账户的基础货币不是 USD 时才需要 |
 
@@ -192,6 +197,12 @@ launchctl unload ~/Library/LaunchAgents/com.ibkr-dashboard.server.plist
 - **区间收益率**使用时间加权收益率（TWR）：`Π(1 + 当日收益率) − 1`，和 IBKR PortfolioAnalyst 的口径一致，不受出入金时点影响
 - 周末、休市日没有 NAV，日历上这些日子显示为空
 
+**已实现盈亏排行和订单：**
+- 已实现盈亏使用 IBKR 的 `fifoPnlRealized`：按 FIFO（先进先出）配对开平仓，**已扣除佣金**。如果在 IBKR 后台把税务批次方法改成了其他方式，数字会和 IBKR 报表不同
+- 排行按合约汇总：股票按代码，期权按具体合约（到期日加行权价），只统计区间内**有平仓**的标的
+- 订单：同一个 IBKR 订单号下的多笔成交合并为一个订单，价格是按数量加权的成交均价；时间取第一笔成交的时间，时区与 IBKR 报表一致（一般为美东时间）
+- 只包含已成交的记录。Flex Query 里没有未成交或已撤销的委托
+
 ---
 
 ## 常见问题
@@ -229,9 +240,10 @@ launchctl unload ~/Library/LaunchAgents/com.ibkr-dashboard.server.plist
 app/
   config.py       读取 .env
   flex_client.py  Flex Web Service 请求（SendRequest → GetStatement）
-  parser.py       解析 Flex XML（NAV / 出入金 / 转仓 / 汇率）
+  parser.py       解析 Flex XML（NAV / 出入金 / 转仓 / 汇率 / 成交）
   db.py           SQLite 存储
   calc.py         每日盈亏、收益率、TWR、按月/年汇总
+  trades.py       订单合并、已实现盈亏排行
   fetch.py        命令行：拉取或导入数据
   server.py       FastAPI 接口 + 托管前端、每日定时拉取
   demo.py         演示模式（模拟数据）

@@ -23,7 +23,8 @@ def import_xml(text: str, source: str, log=print) -> str:
     parts = []
     for st in statements:
         rng = f"{min(st.nav)} ~ {max(st.nav)}" if st.nav else "无 NAV 数据"
-        parts.append(f"{st.account_id}: {len(st.nav)} 天 NAV, {len(st.flows)} 笔出入金/转仓 ({rng})")
+        trades = f", {len(st.trades)} 笔成交" if st.trades is not None else ""
+        parts.append(f"{st.account_id}: {len(st.nav)} 天 NAV, {len(st.flows)} 笔出入金/转仓{trades} ({rng})")
         for w in st.warnings:
             log(f"⚠️  {st.account_id}: {w}")
         if st.expected_flow is not None and st.nav:

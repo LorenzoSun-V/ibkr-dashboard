@@ -32,6 +32,36 @@ CREATE TABLE IF NOT EXISTS fx (
     rate     REAL NOT NULL,
     PRIMARY KEY (date, from_ccy, to_ccy)
 );
+CREATE TABLE IF NOT EXISTS trades (
+    account_id  TEXT NOT NULL,
+    trade_id    TEXT NOT NULL,
+    order_id    TEXT,
+    trade_date  TEXT NOT NULL,
+    time        TEXT,
+    asset       TEXT,
+    conid       TEXT,
+    symbol      TEXT,
+    underlying  TEXT,
+    description TEXT,
+    put_call    TEXT,
+    strike      REAL,
+    expiry      TEXT,
+    multiplier  REAL,
+    currency    TEXT,
+    fx          REAL,
+    side        TEXT,
+    cancelled   INTEGER,
+    quantity    REAL,
+    price       REAL,
+    proceeds    REAL,
+    commission  REAL,
+    realized    REAL,
+    open_close  TEXT,
+    order_type  TEXT,
+    exchange    TEXT,
+    PRIMARY KEY (account_id, trade_id)
+);
+CREATE INDEX IF NOT EXISTS idx_trades_date ON trades (trade_date);
 CREATE TABLE IF NOT EXISTS fetch_log (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     at      TEXT NOT NULL,
@@ -39,6 +69,13 @@ CREATE TABLE IF NOT EXISTS fetch_log (
     message TEXT
 );
 """
+
+
+TRADE_COLUMNS = (
+    "trade_id", "order_id", "trade_date", "time", "asset", "conid", "symbol", "underlying", "description",
+    "put_call", "strike", "expiry", "multiplier", "currency", "fx", "side", "cancelled", "quantity", "price",
+    "proceeds", "commission", "realized", "open_close", "order_type", "exchange",
+)
 
 
 @contextmanager
@@ -78,6 +115,17 @@ def save_statement(conn: sqlite3.Connection, st: AccountStatement) -> None:
         "INSERT INTO flows (account_id, date, amount, kind, description) VALUES (?, ?, ?, ?, ?)",
         [(st.account_id, d.isoformat(), amt, kind, desc) for d, amt, kind, desc in st.flows if d],
     )
+    if st.trades is not None:
+        t_dates = [t["trade_date"] for t in st.trades]
+        t_lo = min([lo, *t_dates])
+        t_hi = max([hi, *t_dates])
+        conn.execute("DELETE FROM trades WHERE account_id = ? AND trade_date BETWEEN ? AND ?",
+                     (st.account_id, t_lo, t_hi))
+        cols = TRADE_COLUMNS
+        conn.executemany(
+            f"INSERT OR REPLACE INTO trades (account_id, {', '.join(cols)}) VALUES (?, {', '.join('?' * len(cols))})",
+            [(st.account_id, *(t[c] for c in cols)) for t in st.trades],
+        )
     conn.executemany(
         "INSERT OR REPLACE INTO fx (date, from_ccy, to_ccy, rate) VALUES (?, ?, ?, ?)",
         [(d.isoformat(), f, t, r) for d, f, t, r in st.fx if r],
@@ -100,3 +148,18 @@ def load_all(conn: sqlite3.Connection):
     fx = [(date.fromisoformat(r["date"]), r["from_ccy"], r["to_ccy"], r["rate"])
           for r in conn.execute("SELECT * FROM fx ORDER BY date")]
     return accounts, nav, flows, fx
+
+
+def load_trades(conn: sqlite3.Connection, accounts: list[str] | None, start: str | None, end: str | None):
+    sql = "SELECT * FROM trades WHERE cancelled = 0"
+    args: list = []
+    if accounts:
+        sql += f" AND account_id IN ({','.join('?' * len(accounts))})"
+        args += accounts
+    if start:
+        sql += " AND trade_date >= ?"
+        args.append(start)
+    if end:
+        sql += " AND trade_date <= ?"
+        args.append(end)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY trade_date, time", args)]
