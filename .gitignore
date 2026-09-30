@@ -1,0 +1,18 @@
+# 敏感信息：token、Query ID、账户别名
+.env
+.env.*
+!.env.example
+
+# 本地数据：SQLite 数据库、原始 Flex XML（含账户号、资产明细）、日志
+data/
+*.db
+*.sqlite
+
+# 环境与缓存
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.vscode/
+.idea/
