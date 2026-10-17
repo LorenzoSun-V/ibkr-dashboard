@@ -158,25 +158,22 @@ Web Service 一次最多拉 365 天，更早的数据需要手动导出后导入
 
 服务运行期间，每天会在 `AUTO_FETCH_TIME` 自动拉取一次，所以只要保持服务一直运行就行。服务启动时（或电脑睡眠醒来后）如果已经过了这个时间、当天还没成功拉取过，会立即补拉一次。在 macOS 上可以用 launchd 让它开机自启：
 
-在项目目录下执行（会把模板里的 `/path/to/ibkr-dashboard` 替换成当前目录）：
+在项目目录下执行（可以重复运行：更新代码、移动目录后再跑一次就会重新加载）：
 
 ```bash
-sed "s#/path/to/ibkr-dashboard#$(pwd)#g" deploy/com.ibkr-dashboard.server.plist > ~/Library/LaunchAgents/com.ibkr-dashboard.server.plist
+deploy/install-macos.sh
 ```
+
+它会生成 `~/Library/LaunchAgents/com.ibkr-dashboard.server.plist` 并加载，最后告诉你服务有没有起来。确认状态、停止或取消自启：
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.ibkr-dashboard.server.plist
+launchctl list | grep ibkr-dashboard     # 第一列是进程号就是在运行；是 "-" 就是没起来，第二列是上次的退出码
+deploy/install-macos.sh uninstall
 ```
 
-停止或取消自启：
+日志在 `~/Library/Logs/ibkr-dashboard/server.log`（内置硬盘上）。
 
-```bash
-launchctl unload ~/Library/LaunchAgents/com.ibkr-dashboard.server.plist
-```
-
-日志在 `data/server.log`。如果移动了项目目录，重新执行上面的 `sed` 命令即可。
-
-> 如果项目放在外接硬盘上，开机时硬盘还没挂载好，服务会启动失败，launchd 会自动重试（`KeepAlive`）。
+> **项目放在外接硬盘（`/Volumes/...`）或「文稿」「桌面」「下载」里**：macOS 不让后台服务读这些位置，服务起不来，`launchctl list` 里显示退出码 `78`。给虚拟环境实际用的 Python 开「完全磁盘访问权限」：系统设置 → 隐私与安全性 → 完全磁盘访问权限 → 点「＋」→ 按 ⌘⇧G 粘贴脚本打印出的路径（也可以用 `.venv/bin/python -c 'import os,sys;print(os.path.realpath(sys.executable))'` 查）→ 打开开关，再运行一次 `deploy/install-macos.sh`。日志特意放在内置硬盘上，因为 launchd 打不开外接硬盘上的日志文件，旧版模板把日志放在 `data/` 里就会这样失败。开机时硬盘还没挂载好也没关系，挂上后服务会自己启动。
 
 **手机访问**：网页和 `/api/` 下的旧接口没有登录验证，谁能连上端口谁就能看到全部账户。
 
@@ -303,7 +300,7 @@ app/
   server.py       FastAPI 接口 + 托管前端、每日定时拉取
   demo.py         演示模式（模拟数据）
 web/              前端页面（原生 HTML/JS/CSS，无需构建）
-deploy/           launchd 开机自启配置
+deploy/           macOS 开机自启（install-macos.sh 生成 launchd 配置）
 tests/            单元测试
 docs/screenshots/ README 截图（由演示数据生成）
 data/             数据库与原始 XML（自动创建，已 gitignore）
