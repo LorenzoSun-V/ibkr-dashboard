@@ -22,6 +22,8 @@ from .parser import parse_date
 
 ET_ZONE = ZoneInfo("America/New_York")  # Flex 的 dateTime、whenGenerated 是美东时间
 REQUIRED_SECTIONS = ("EquitySummaryInBase", "CashTransactions", "Transfers", "ChangeInNAV")
+CHANGE_IN_NAV_FIELDS = ("startingValue", "endingValue", "linkingAdjustments", "depositsWithdrawals",
+                        "internalCashTransfers", "assetTransfers")
 FLOW_TOLERANCE = Decimal("0.01")  # Change in NAV 的汇总值和明细合计允许的差（汇总值本身按分舍入）
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger_statements (
@@ -142,7 +144,7 @@ def _signed(amount: Decimal, direction: str | None) -> Decimal:
 
 
 def _flow(row: ET.Element, kind: str, amount: Decimal, base: Decimal, fx: Decimal) -> dict:
-    report = parse_date(row.get("reportDate") or row.get("date") or row.get("dateTime"))
+    report = parse_date(row.get("reportDate"))  # 归属日只认 reportDate，不用 date / dateTime 推测
     settle = parse_date(row.get("settleDate"))
     return {
         "transaction_id": row.get("transactionID") or "",
@@ -189,10 +191,12 @@ def _parse_statement(st: ET.Element) -> RawStatement:
 
     for row in st.iter("EquitySummaryByReportDateInBase"):
         d = parse_date(row.get("reportDate"))
-        total = _plain(row.get("total"))
+        total = _need(row, "total", problems)
+        if d is None:
+            problems.append("每日 NAV 有一行缺少 reportDate")
         if d is None or total is None:
             continue
-        raw.nav[d] = total
+        raw.nav[d] = _plain(row.get("total"))
         raw.base_currency = raw.base_currency or row.get("currency")
     if raw.base_currency is None and cin_el is not None:
         raw.base_currency = cin_el.get("currency")
@@ -200,8 +204,10 @@ def _parse_statement(st: ET.Element) -> RawStatement:
     for row in st.iter("CashTransaction"):
         if not _detail(row) or (row.get("type") or "") != "Deposits/Withdrawals":
             continue
-        amount = dec(row.get("amount")) or Decimal(0)
-        fx = dec(row.get("fxRateToBase")) or Decimal(1)
+        amount = _need(row, "amount", problems)
+        fx = _fx(row, problems)
+        if amount is None or fx is None or not _has_report_date(row, problems):
+            continue  # 报表已标为不完整：不拿 0、1 或推测的日期顶替
         if amount:
             raw.flows.append(_flow(row, "cash", amount, amount * fx, fx))
 
@@ -212,15 +218,27 @@ def _parse_statement(st: ET.Element) -> RawStatement:
         if row.get("direction") is None and row.get("positionAmount") is None and row.get("cashTransfer") is None:
             blank += 1
             continue
-        fx = dec(row.get("fxRateToBase")) or Decimal(1)
+        if not _has_report_date(row, problems):
+            continue
         if (row.get("assetCategory") or "").upper() == "CASH":
-            amount = _signed(dec(row.get("cashTransfer")) or Decimal(0), row.get("direction"))
+            cash, fx = _need(row, "cashTransfer", problems), _fx(row, problems)
+            if cash is None or fx is None:
+                continue
+            amount = _signed(cash, row.get("direction"))
             base = amount * fx
             kind = "internal" if (row.get("type") or "").upper() == "INTERNAL" else "cash_transfer"
         else:
-            amount = _signed(dec(row.get("positionAmount")) or Decimal(0), row.get("direction"))
-            in_base = dec(row.get("positionAmountInBase"))
-            base = _signed(in_base, row.get("direction")) if in_base is not None else amount * fx
+            in_base = _number(row, "positionAmountInBase", problems)
+            if in_base is not None:
+                amount = _signed(_number(row, "positionAmount", problems) or Decimal(0), row.get("direction"))
+                base = _signed(in_base, row.get("direction"))
+                fx = _number(row, "fxRateToBase", problems) or Decimal(1)
+            else:
+                position, fx = _need(row, "positionAmount", problems), _fx(row, problems)
+                if position is None or fx is None:
+                    continue
+                amount = _signed(position, row.get("direction"))
+                base = amount * fx
             kind = "position"
         if amount or base:
             raw.flows.append(_flow(row, kind, amount, base, fx))
@@ -245,24 +263,77 @@ def _parse_statement(st: ET.Element) -> RawStatement:
         seen.add(f["transaction_id"])
         if not f["report_date"]:
             problems.append(f"资金流水 {f['transaction_id']} 没有日期")
+    if "ChangeInNAV" in sections and raw.change_in_nav is None:
+        problems.append("Change in NAV 没有数据")
     if raw.change_in_nav is not None and raw.nav:
         problems.extend(_check_change_in_nav(raw))
     return raw
 
 
+def _label(row: ET.Element) -> str:
+    return f"{row.tag} {row.get('transactionID') or '（无编号）'}"
+
+
+def _number(row: ET.Element, attr: str, problems: list[str]) -> Decimal | None:
+    """A number that may be absent; one that is there but unreadable makes the statement incomplete."""
+    try:
+        return dec(row.get(attr))
+    except ValueError:
+        problems.append(f"{_label(row)} 的 {attr} 不是数字：{row.get(attr)!r}")
+        return None
+
+
+def _need(row: ET.Element, attr: str, problems: list[str]) -> Decimal | None:
+    """A number the ledger books from: missing or unreadable makes the statement incomplete."""
+    if row.get(attr) is None or not row.get(attr).strip():
+        problems.append(f"{_label(row)} 缺少 {attr}")
+        return None
+    return _number(row, attr, problems)
+
+
+def _fx(row: ET.Element, problems: list[str]) -> Decimal | None:
+    """Rate to USD. Required for any other currency; a USD row may leave it out (it is 1)."""
+    if (row.get("currency") or "") == "USD" and not (row.get("fxRateToBase") or "").strip():
+        return Decimal(1)
+    if not row.get("currency"):
+        problems.append(f"{_label(row)} 缺少 currency")
+        return None
+    fx = _need(row, "fxRateToBase", problems)
+    if fx is not None and fx <= 0:
+        problems.append(f"{_label(row)} 的 fxRateToBase 是 {fx}")
+        return None
+    return fx
+
+
+def _has_report_date(row: ET.Element, problems: list[str]) -> bool:
+    if parse_date(row.get("reportDate")) is None:
+        problems.append(f"{_label(row)} 缺少 reportDate")
+        return False
+    return True
+
+
 def _check_change_in_nav(raw: RawStatement) -> list[str]:
     cin = raw.change_in_nav
     out = []
-    linking = dec(cin.get("linkingAdjustments"))
-    if linking:
-        out.append(f"Change in NAV 有 linkingAdjustments {linking}，需要人工处理")
+    values = {}
+    for k in CHANGE_IN_NAV_FIELDS:  # 核对要用的字段缺一个，这份报表就不能用
+        try:
+            values[k] = dec(cin.get(k))
+        except ValueError:
+            values[k] = None
+        if values[k] is None:
+            out.append(f"Change in NAV 缺少或无法识别 {k}")
+    if out:
+        return out
+    if values["linkingAdjustments"]:
+        out.append(f"Change in NAV 有 linkingAdjustments {values['linkingAdjustments']}，需要人工处理")
     first, last = min(raw.nav), max(raw.nav)
-    start, end = dec(cin.get("startingValue")), dec(cin.get("endingValue"))
-    if start is not None and start != Decimal(raw.nav[first]):
+    start, end = values["startingValue"], values["endingValue"]
+    if start != Decimal(raw.nav[first]):
         out.append(f"Change in NAV 期初值 {start} 和 {first} 的 NAV {raw.nav[first]} 不一致")
-    if end is not None and end != Decimal(raw.nav[last]):
+    if end != Decimal(raw.nav[last]):
         out.append(f"Change in NAV 期末值 {end} 和 {last} 的 NAV {raw.nav[last]} 不一致")
-    expected = sum((dec(cin.get(k)) or Decimal(0)) for k in ("depositsWithdrawals", "internalCashTransfers", "assetTransfers"))
+    expected = sum(values[k] for k in ("depositsWithdrawals", "internalCashTransfers", "assetTransfers"))
     lo, hi = parse_date(cin.get("fromDate")) or raw.from_date, parse_date(cin.get("toDate")) or raw.to_date
     got = sum((Decimal(f["base_amount"]) for f in raw.flows
                if (lo is None or f["report_date"] >= lo.isoformat()) and (hi is None or f["report_date"] <= hi.isoformat())),

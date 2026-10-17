@@ -251,3 +251,72 @@ def test_unknown_account_returns_no_data(client):
     r = client.get("/api/ledger/statement", params={"account": "U0000077", "since": "2026-10-01"}, headers=_auth(key))
     assert r.status_code == 200
     assert r.json()["latest_report_date"] is None and r.json()["nav"] == []
+
+
+def _drop(text, attr, txids=None):
+    """Remove an attribute from the rows with these transactionIDs (all rows when None)."""
+    import re
+    out = []
+    for line in text.split("\n"):
+        if txids is None or any(f'transactionID="{t}"' in line for t in txids):
+            line = re.sub(rf'\s{attr}="[^"]*"', "", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+CNH = ("9000000001", "9000000002")  # 70000 CNH 入金，当天转去另一个账户：两笔方向相反
+
+
+@pytest.mark.parametrize("attr, txids, expected", [
+    ("fxRateToBase", CNH, "fxRateToBase"),
+    ("amount", ("9000000001",), "amount"),
+    ("cashTransfer", ("9000000002",), "cashTransfer"),
+    ("reportDate", CNH, "reportDate"),
+    ("currency", ("9000000001",), "currency"),
+])
+def test_flow_missing_a_booked_field_makes_the_statement_incomplete(attr, txids, expected):
+    broken = _drop(A, attr, txids)
+    (st,) = ledger.parse_records(broken)
+    assert any(expected in p for p in st.problems), st.problems
+    # 作为新版导入：不被选为完整报表，接口沿用旧版的金额和日期
+    _import(A)
+    _import(_revise(broken, "20261011;091852"))
+    with db.connect() as conn:
+        result = ledger.statement(conn, "U0000038", "2026-09-30")
+    flows = {f["transaction_id"]: f for f in result["flows"]}
+    assert Decimal(flows["9000000001"]["base_amount"]) == Decimal("10346.70")
+    assert flows["9000000001"]["report_date"] == "2026-10-01"
+    assert "9000000002" in flows
+    assert result["latest_statement"]["problems"]
+    assert result["latest_complete_statement"]["when_generated"] == "2026-10-10T09:18:52"
+
+
+def test_usd_row_without_rate_is_one():
+    (st,) = ledger.parse_records(_drop(A, "fxRateToBase", ("9000000003",)))
+    assert st.problems == []
+    assert next(f for f in st.flows if f["transaction_id"] == "9000000003")["fx_rate"] == "1"
+
+
+def test_unreadable_number_is_reported_not_raised():
+    (st,) = ledger.parse_records(A.replace('amount="30000"', 'amount="abc"'))
+    assert any("不是数字" in p for p in st.problems)
+
+
+@pytest.mark.parametrize("attr", ["startingValue", "endingValue", "linkingAdjustments", "depositsWithdrawals"])
+def test_change_in_nav_missing_a_check_field_is_refused(attr):
+    (st,) = ledger.parse_records(_drop(A, attr))
+    assert any(attr in p for p in st.problems), st.problems
+
+
+def test_change_in_nav_without_check_fields_cannot_replace_a_good_version():
+    _import(A)
+    broken = A
+    for attr in ("startingValue", "endingValue", "linkingAdjustments"):
+        broken = _drop(broken, attr)
+    broken = _revise(broken.replace('total="28301.0"', 'total="999999999.99"'), "20261011;091852")
+    _import(broken)
+    with db.connect() as conn:
+        result = ledger.statement(conn, "U0000038", "2026-10-09")
+    assert result["nav"][-1]["total"] == "28301.0"
+    assert any("endingValue" in p for p in result["latest_statement"]["problems"])
+    assert result["latest_complete_statement"]["when_generated"] == "2026-10-10T09:18:52"
