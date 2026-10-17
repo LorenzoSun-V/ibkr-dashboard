@@ -3,6 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
 
+from . import ledger
 from .config import settings
 from .parser import AccountStatement
 
@@ -84,6 +85,7 @@ def connect():
     conn = sqlite3.connect(settings.db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    conn.executescript(ledger.SCHEMA)
     try:
         yield conn
         conn.commit()

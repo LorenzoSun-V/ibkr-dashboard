@@ -155,7 +155,7 @@ def parse_flex_xml(text: str) -> list[AccountStatement]:
             fx = _num(row.get("fxRateToBase")) or 1.0
             if (row.get("assetCategory") or "").upper() == "CASH":
                 # 账户间现金划转：不在 CashTransactions 的 Deposits/Withdrawals 里，需要单独计入
-                value = (_num(row.get("cashTransfer")) or _num(row.get("positionAmount")) or _num(row.get("quantity"))) * fx
+                value = _num(row.get("cashTransfer")) * fx
             else:
                 value = _num(row.get("positionAmountInBase")) or _num(row.get("positionAmount")) * fx
             if not value:

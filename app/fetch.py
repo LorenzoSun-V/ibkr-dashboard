@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import db
+from . import db, ledger
 from .config import settings
 from .flex_client import fetch_statement
 from .parser import parse_flex_xml
@@ -17,9 +17,11 @@ from .parser import parse_flex_xml
 
 def import_xml(text: str, source: str, log=print) -> str:
     statements = parse_flex_xml(text)
+    records = ledger.parse_records(text)
     with db.connect() as conn:
         for st in statements:
             db.save_statement(conn, st)
+        ledger.save(conn, records, source)
     parts = []
     for st in statements:
         rng = f"{min(st.nav)} ~ {max(st.nav)}" if st.nav else "无 NAV 数据"
@@ -35,6 +37,10 @@ def import_xml(text: str, source: str, log=print) -> str:
                     f"明细合计 {got:,.2f}。请检查 Cash Transactions / Transfers 的配置")
             else:
                 log(f"✅ {st.account_id}: 出入金对账一致（{got:,.2f}）")
+        for r in records:
+            if r.account_id == st.account_id:
+                for p in r.problems:
+                    log(f"⚠️  {st.account_id}（记账接口）: {p}")
         if not st.nav:
             log(f"⚠️  {st.account_id} 没有 NAV 数据：该 Query 的期间为 {st.period or '?'}，"
                 f"包含的 section 为 {', '.join(st.sections) or '无'}。\n"
