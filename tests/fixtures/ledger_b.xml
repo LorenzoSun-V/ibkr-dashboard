@@ -1,0 +1,23 @@
+<!-- 虚构数据：和 ledger_a.xml 是同一次更新里另一个 Query 的报表；6038→6298 式的账户间划转两边共用 transactionID -->
+<FlexQueryResponse queryName="Daily NAV 2" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000098" fromDate="20261001" toDate="20261009" period="Last365CalendarDays" whenGenerated="20261010;091904">
+<EquitySummaryInBase>
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20260930" total="0" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261001" total="10346.7" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261002" total="10350.12" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261005" total="10340" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261006" total="10345.5" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261007" total="10349.9" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261008" total="22351.634867439" />
+<EquitySummaryByReportDateInBase accountId="U0000098" currency="USD" reportDate="20261009" total="22360.03456131" />
+</EquitySummaryInBase>
+<ChangeInNAV accountId="U0000098" currency="USD" fromDate="20261001" toDate="20261009" startingValue="0" depositsWithdrawals="22346.7" internalCashTransfers="0" assetTransfers="0" linkingAdjustments="0" endingValue="22360.03456131" />
+<CashTransactions />
+<Transfers>
+<Transfer accountId="U0000098" currency="CNH" fxRateToBase="0.14781" assetCategory="CASH" symbol="--" description="TRANSFER FROM U0000038 TO U0000098" reportDate="20261001" date="20261001" dateTime="20261001;003433" settleDate="20261001" type="INTERNAL" direction="IN" account="U0000038" quantity="0" positionAmount="0" positionAmountInBase="0" cashTransfer="70000" transactionID="9000000002" levelOfDetail="TRANSFER" />
+<Transfer accountId="U0000098" currency="USD" fxRateToBase="1" assetCategory="CASH" symbol="--" description="TRANSFER FROM U0000038 TO U0000098" reportDate="20261008" date="20261007" dateTime="20261007;215712" settleDate="20261008" type="INTERNAL" direction="IN" account="U0000038" quantity="0" positionAmount="0" positionAmountInBase="0" cashTransfer="12000" transactionID="9000000006" levelOfDetail="TRANSFER" />
+</Transfers>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>

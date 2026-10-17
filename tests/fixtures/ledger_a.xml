@@ -1,0 +1,29 @@
+<!-- 虚构数据：结构、字段、日期格式和小数位仿照真实的 Activity Flex Query（Last 365 Calendar Days），账号和金额都是编的 -->
+<FlexQueryResponse queryName="Daily NAV" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000038" fromDate="20261001" toDate="20261009" period="Last365CalendarDays" whenGenerated="20261010;091852">
+<EquitySummaryInBase>
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20260930" cash="10283.892372948" stock="0" total="10283.892372948" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261001" cash="10290.116878412" stock="0" total="10290.116878412" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261002" cash="10301.5" stock="0" total="10301.5" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261005" cash="40310.25" stock="0" total="40310.25" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261006" cash="40322.004" stock="0" total="40322.004" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261007" cash="40300.1" stock="0" total="40300.1" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261008" cash="28290.676252135" stock="0" total="28290.676252135" />
+<EquitySummaryByReportDateInBase accountId="U0000038" acctAlias="" model="" currency="USD" reportDate="20261009" cash="28301.0" stock="0" total="28301.0" />
+</EquitySummaryInBase>
+<ChangeInNAV accountId="U0000038" acctAlias="" model="" currency="USD" fromDate="20261001" toDate="20261009" startingValue="10283.892372948" mtm="26.1" depositsWithdrawals="18010" internalCashTransfers="0" assetTransfers="0" interest="1.65" linkingAdjustments="0" endingValue="28301.00" twr="0.1" />
+<CashTransactions>
+<CashTransaction accountId="U0000038" acctAlias="" model="" currency="CNH" fxRateToBase="0.14781" assetCategory="" symbol="" description="CASH RECEIPTS / ELECTRONIC FUND TRANSFERS" dateTime="20261001" settleDate="20261001" availableForTradingDate="20261001" amount="70000" type="Deposits/Withdrawals" tradeID="" code="" transactionID="9000000001" reportDate="20261001" clientReference="" actionID="" levelOfDetail="DETAIL" serialNumber="" deliveryType="" commodityType="" fineness="0.0" weight="0.0 ()" />
+<CashTransaction accountId="U0000038" acctAlias="" model="" currency="USD" fxRateToBase="1" assetCategory="" symbol="" description="CASH RECEIPTS / ELECTRONIC FUND TRANSFERS" dateTime="20261004;223902" settleDate="20261005" availableForTradingDate="20261004" amount="30000" type="Deposits/Withdrawals" tradeID="" code="" transactionID="9000000003" reportDate="20261005" clientReference="" actionID="" levelOfDetail="DETAIL" serialNumber="" deliveryType="" commodityType="" fineness="0.0" weight="0.0 ()" />
+<CashTransaction accountId="U0000038" acctAlias="" model="" currency="USD" fxRateToBase="1" assetCategory="" symbol="" description="CASH RECEIPTS / ELECTRONIC FUND TRANSFERS" dateTime="20261006;200801" settleDate="20261007" availableForTradingDate="20261006" amount="10" type="Deposits/Withdrawals" tradeID="" code="" transactionID="9000000004" reportDate="20261006" clientReference="" actionID="" levelOfDetail="DETAIL" serialNumber="" deliveryType="" commodityType="" fineness="0.0" weight="0.0 ()" />
+<CashTransaction accountId="U0000038" acctAlias="" model="" currency="USD" fxRateToBase="1" assetCategory="" symbol="" description="USD IBKR MANAGED SECURITIES (SYEP) FOR SEP-2026" dateTime="20261005" settleDate="20261005" availableForTradingDate="" amount="1.65" type="Broker Interest Received" tradeID="" code="" transactionID="9000000005" reportDate="20261005" clientReference="" actionID="" levelOfDetail="DETAIL" serialNumber="" deliveryType="" commodityType="" fineness="0.0" weight="0.0 ()" />
+<CashTransaction accountId="U0000038" currency="BASE_SUMMARY" amount="30010" type="Deposits/Withdrawals" levelOfDetail="SUMMARY" reportDate="" />
+</CashTransactions>
+<Transfers>
+<Transfer accountId="U0000038" acctAlias="" model="" currency="CNH" fxRateToBase="0.14781" assetCategory="CASH" symbol="--" description="TRANSFER FROM U0000038 TO U0000098" reportDate="20261001" date="20261001" dateTime="20261001;003433" settleDate="20261001" type="INTERNAL" direction="OUT" company="" account="U0000098" accountName="-" deliveringBroker="" quantity="0" transferPrice="0" positionAmount="0" positionAmountInBase="0" pnlAmount="0" pnlAmountInBase="0" cashTransfer="-70000" code="" clientReference="" transactionID="9000000002" levelOfDetail="TRANSFER" />
+<Transfer accountId="U0000038" acctAlias="" model="" currency="USD" fxRateToBase="1" assetCategory="CASH" symbol="--" description="TRANSFER FROM U0000038 TO U0000098" reportDate="20261008" date="20261007" dateTime="20261007;215712" settleDate="20261008" type="INTERNAL" direction="OUT" company="" account="U0000098" accountName="-" deliveringBroker="" quantity="0" transferPrice="0" positionAmount="0" positionAmountInBase="0" pnlAmount="0" pnlAmountInBase="0" cashTransfer="-12000" code="" clientReference="" transactionID="9000000006" levelOfDetail="TRANSFER" />
+</Transfers>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>
