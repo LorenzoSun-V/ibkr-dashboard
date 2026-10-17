@@ -9,6 +9,7 @@ from datetime import date, datetime
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import calc, db, keys, ledger, trades
@@ -60,6 +61,16 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="IBKR 收益日历", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def ledger_keys_only_reach_ledger(request, call_next):
+    """带记账密钥的请求只能访问 /api/ledger/*。网页接口不验证身份（只给本机浏览器用），
+    记账软件的地址如果被填成网页接口，不能借这把密钥读到别的账户。浏览器访问网页不带这个头。"""
+    path = request.url.path
+    if request.headers.get("authorization") and not path.startswith("/api/ledger/"):
+        return JSONResponse({"detail": "记账密钥只能访问 /api/ledger/ 接口"}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")

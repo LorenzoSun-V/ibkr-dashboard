@@ -320,3 +320,13 @@ def test_change_in_nav_without_check_fields_cannot_replace_a_good_version():
     assert result["nav"][-1]["total"] == "28301.0"
     assert any("endingValue" in p for p in result["latest_statement"]["problems"])
     assert result["latest_complete_statement"]["when_generated"] == "2026-10-10T09:18:52"
+
+
+@pytest.mark.parametrize("path", ["/api/meta?/api/ledger/accounts", "/api/meta", "/api/daily", "/api/summary"])
+def test_ledger_key_cannot_reach_the_web_api(client, path):
+    # 记账软件的地址被填成网页接口（http://127.0.0.1:8000/api/meta?），请求带着 Zoey 的密钥：
+    # 不能借此读到所有账户
+    r = client.get(path, headers=_auth(client.zoey))
+    assert r.status_code == 403
+    assert "U0000038" not in r.text
+    assert client.get("/api/meta").status_code == 200  # 浏览器访问网页照常
